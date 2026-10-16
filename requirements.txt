@@ -1,0 +1,11 @@
+fastapi
+jinja2
+python-multipart
+python-dotenv
+google-genai
+SQLAlchemy
+psycopg2-binary
+pandas
+numpy
+matplotlib
+python-docx

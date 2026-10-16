@@ -1,0 +1,911 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
+    <title>Workspace CBT - RoboMANTAP</title>
+
+    <!-- TailWind CSS & HTMX -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    
+    <!-- KaTeX Mathematics Renderer -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+
+    <style>
+        * {
+            -webkit-user-select: none !important;
+            -moz-user-select: none !important;
+            -ms-user-select: none !important;
+            user-select: none !important;
+            -webkit-touch-callout: none !important;
+        }
+        #question-box {
+            min-height: 260px;
+        }
+
+        /* CBT UX: jangan tampilkan LaTeX mentah saat soal sedang dipindahkan */
+        #question-text.math-pending,
+        #options-container.math-pending {
+            visibility: hidden;
+        }
+
+        /* FIX KATEX: Mencegah rumus matematika terdistorsi */
+        .katex, .katex-html {
+            text-align: left !important;
+            text-justify: none !important;
+            white-space: nowrap !important;
+            display: inline-block !important;
+        }
+        .katex-display {
+            text-align: center !important;
+            display: block !important;
+            white-space: normal !important;
+        }
+
+        /* HTMX Indicator Spinner Custom Style */
+        .htmx-indicator {
+            display: none;
+        }
+        .htmx-request .htmx-indicator, 
+        .htmx-request.htmx-indicator {
+            display: flex !important;
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans select-none antialiased w-full flex flex-col justify-center items-center">
+
+    <!-- ============================================================================== -->
+    <!-- 1. CONTAINER LOBBY PRE-KUIS (TAMPIL DEFAUT SAAT HALAMAN DIBUKA) -->
+    <!-- ============================================================================== -->
+    <div id="lobby-container" class="max-w-lg w-full bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-2xl space-y-6 my-auto mx-auto">
+        <div class="border-b border-slate-800 pb-4">
+            <span class="text-xs font-bold text-emerald-400 uppercase tracking-widest">Informasi Quiz</span>
+            <h1 class="text-xl font-bold text-white mt-1">{{ sess.config.mapel if sess.config else mapel }}</h1>
+            <p class="text-xs text-slate-400">Materi: {{ sess.config.materi if sess.config else materi }}</p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4 text-sm">
+            <div class="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                <p class="text-xs text-slate-400">Peserta Kuis</p>
+                <p class="font-semibold text-emerald-300 mt-1 truncate">{{ sess.nama if sess else nama }}</p>
+                <p class="text-xs text-slate-500 mt-0.5">
+                    Kelas: {{ sess.kelas if sess else kelas }} • Absen: {{ sess.absen if sess else absen }}
+                </p>
+            </div>
+            <div class="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                <p class="text-xs text-slate-400">Jumlah Soal & Durasi</p>
+                <p class="font-semibold text-emerald-300 mt-1">{{ jumlah_soal if jumlah_soal is defined else (sess.quiz|length if sess and sess.quiz else 0) }} Soal</p>
+                <p class="text-xs text-slate-500 mt-0.5">Waktu: {{ durasi_label if durasi_label is defined else (((sess.config.timer_seconds // 3600) ~ " jam " ~ ((sess.config.timer_seconds % 3600) // 60) ~ " menit") if sess and sess.config and sess.config.timer_seconds and sess.config.timer_seconds >= 3600 else (((sess.config.timer_seconds // 60) ~ " menit") if sess and sess.config and sess.config.timer_seconds else "Tanpa batas waktu")) }}</p>
+            </div>
+        </div>
+
+        <div class="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-4 text-xs text-slate-300 space-y-2">
+            <p class="font-bold text-emerald-400">⚠️ Aturan Pengerjaan:</p>
+            <ul class="list-disc list-outside ml-4 space-y-1 text-[11px] text-slate-400">
+                <li>Dilarang meninggalkan tab atau berpindah aplikasi (Maksimal 3 kali peringatan)</li>
+                <li>Gunakan navigasi nomor untuk berpindah soal secara bebas</li>
+                <li>Kuis otomatis berakhir jika timer mencapai 00:00</li>
+                <li>Jawaban tersimpan otomatis saat memilih opsi</li>
+                <li>Klik tombol "Ragu-Ragu" bila keraguan mulai merasukimu</li>
+            </ul>
+        </div>
+
+        <!-- Tombol Trigger Pindah dari Lobby ke Exam + Fullscreen -->
+        <button type="button" 
+                onclick="startExamFromLobby()"
+                class="w-full bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-slate-950 font-bold text-sm py-3.5 px-4 rounded-xl transition shadow-[0_0_20px_rgba(16,185,129,0.35)] mt-4">
+            🚀 Mulai Kuis Sekarang!
+        </button>
+    </div>
+
+    <!-- ============================================================================== -->
+    <!-- 2. CONTAINER WORKSPACE EXAM (DISEMBUNYIKAN SEBELUM KLIK MULAI) -->
+    <!-- ============================================================================== -->
+    <div id="exam-container" class="hidden w-full min-h-screen flex flex-col justify-start">
+
+        <!-- HEADER UTAMA -->
+        <header class="bg-slate-900 border-b border-slate-800 px-4 py-3 sticky top-0 z-40 flex justify-between items-center w-full">
+            <div class="flex items-center space-x-2">
+                <span class="bg-emerald-500 text-slate-950 font-black text-[10px] px-2 py-0.5 rounded">UPN v2.0</span>
+                <div>
+                    <h1 class="text-xs sm:text-sm font-bold text-white leading-none">RoboMANTAP CBT</h1>
+                    <p class="text-[10px] text-emerald-400 mt-0.5 truncate max-w-[130px] sm:max-w-none">{{ sess.config.mapel if sess.config else mapel }}</p>
+                </div>
+            </div>
+            
+            <div class="flex items-center space-x-2 sm:space-x-3">
+                <!-- Tombol Fullscreen / Outfullscreen Dinamis -->
+                <button id="btn-fullscreen-toggle" 
+                        onclick="toggleFullscreenMode()" 
+                        class="bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 text-[10px] sm:text-xs font-bold px-2.5 py-1.5 rounded-lg border border-slate-700 transition flex items-center gap-1.5">
+                    <span id="fs-icon">📺</span> 
+                    <span id="fs-text">Outfullscreen</span>
+                </button>
+                
+                <div class="bg-slate-950 border border-slate-800 px-3 py-1 rounded-lg text-xs">
+                    ⏱️ <span id="timer-display" class="font-mono text-emerald-400 font-bold">--:--</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- CHEAT WARNING BAR -->
+        <div id="cheat-warning-bar" class="hidden bg-amber-500/20 border-b border-amber-500/40 px-4 py-2 text-center text-xs text-amber-300 font-semibold">
+            ⚠️ Warning Pelanggaran Pindah Tab: <span id="violation-count-text">0</span> / 3
+        </div>
+
+        <!-- MAIN QUESTION AREA -->
+        <main class="flex-1 max-w-4xl w-full mx-auto p-3 sm:p-5 flex flex-col justify-start">
+            
+            <div class="flex justify-between items-center bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2.5 mb-3 shadow-md flex-shrink-0">
+                <div class="flex items-center space-x-2 text-xs truncate mr-2">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0"></span>
+                    <span class="text-slate-200 font-semibold truncate">{{ sess.nama if sess else nama }}</span>
+                    <span class="text-slate-600">•</span>
+                    <span class="text-emerald-400 font-medium text-[11px] flex-shrink-0">Kelas {{ sess.kelas if sess else kelas }}</span>
+                </div>
+
+                <button onclick="toggleNavModal(true)" class="bg-emerald-500/10 hover:bg-emerald-500/20 active:scale-95 text-emerald-400 border border-emerald-500/30 text-xs font-bold px-3 py-1.5 rounded-lg flex-shrink-0">
+                    📑 Navigasi Soal
+                </button>
+            </div>
+
+            <section id="question-box" class="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl flex flex-col justify-between">
+                <div>
+                    <div class="flex justify-between items-center border-b border-slate-800 pb-2.5 mb-3">
+                        <span id="label-no-soal" class="text-xs font-bold text-emerald-400 uppercase tracking-widest">Memuat...</span>
+                        <span class="text-[10px] sm:text-xs text-slate-400 bg-slate-800 px-2.5 py-0.5 rounded-lg">Pilihan Ganda</span>
+                    </div>
+
+                    <div id="question-text" class="text-slate-100 text-sm sm:text-base leading-relaxed mb-4 font-medium overflow-x-auto text-justify"></div>
+
+                    <div id="options-container" class="space-y-2.5"></div>
+                </div>
+
+                <div class="flex items-center justify-between border-t border-slate-800/80 pt-3.5 mt-4 gap-2">
+                    <button id="btn-prev" onclick="prevQuestion()" class="flex-1 sm:flex-none bg-emerald-500 active:bg-emerald-400 text-slate-950 font-bold text-xs py-2.5 px-3.5 rounded-xl transition text-center disabled:opacity-40 disabled:cursor-not-allowed">
+                        ← Prev
+                    </button>
+
+                    <button id="btn-ragu" onclick="toggleRagu()" class="flex-1 sm:flex-none bg-amber-500/10 active:bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[10px] font-bold py-2.5 px-2 rounded-xl transition text-center whitespace-nowrap">
+                        ⚠️ Ragu-Ragu
+                    </button>
+
+                    <button id="btn-next-submit" onclick="handleNextOrSubmit()" class="flex-1 sm:flex-none bg-emerald-500 active:bg-emerald-400 text-slate-950 font-bold text-xs py-2.5 px-4 rounded-xl transition shadow-[0_0_15px_rgba(16,185,129,0.3)] text-center">
+                        Next →
+                    </button>
+                </div>
+
+                <!-- BOX ROBOMANTAP HINT (HTMX CONSULTATION) -->
+                <details class="group my-3 border border-slate-800 bg-slate-950/80 rounded-xl overflow-hidden transition">
+                    <summary class="flex items-center justify-between p-3 cursor-pointer font-semibold text-emerald-400 bg-slate-800/40 hover:bg-slate-800/70 select-none text-xs">
+                        <span>Kamu bingung? Konsultasi di sini sama aku, RoboMANTAP! 🧕🏼</span>
+                        <span class="text-[10px] transition-transform group-open:rotate-180">▼</span>
+                    </summary>
+                
+                    <div class="p-3.5 space-y-2.5 text-slate-200">
+                        <p class="text-[11px] text-slate-400 leading-relaxed">
+                            Fungsi kolom ini: Tulis ide awal atau rumus yang mau kamu coba, nanti RoboMANTAP bakal kasih petunjuk jalan keluarnya tanpa langsung bocorin jawaban!
+                        </p>
+                
+                        <!-- Form HTMX -->
+                        <form hx-post="/api/hint"
+                              hx-target="#hint-result"
+                              hx-indicator="#hint-loading"
+                              class="space-y-2">
+                            
+                            <input type="hidden" id="hint-curr-idx" name="curr_idx" value="0">
+                            <input type="hidden" id="hint-mapel" name="mapel" value="{{ sess.config.mapel if sess.config else mapel }}">
+                            <input type="hidden" id="hint-question" name="question" value="">
+                
+                            <div>
+                                <label class="block text-[11px] font-medium text-slate-300 mb-1">
+                                    Gagasan / Ide Logika Kamu apa coba?:
+                                </label>
+                                <input type="text" 
+                                       id="hint-attempt-input"
+                                       name="attempt_input" 
+                                       placeholder="Contoh: Jawaban-nya apa ya? 🤔"
+                                       class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white placeholder-slate-500 focus:border-emerald-500 focus:outline-none">
+                            </div>
+                
+                            <button type="submit" 
+                                    class="px-3.5 py-2 bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-slate-950 font-bold text-xs rounded-lg transition">
+                                Diskusi Yuk!
+                            </button>
+                        </form>
+                
+                        <!-- SPINNER LOADING HTMX -->
+                        <div id="hint-loading" class="htmx-indicator mt-2">
+                            <div class="flex items-center gap-2 text-xs text-emerald-400 animate-pulse">
+                                <span>🧕🏼 RoboMANTAP sedang memproses diskusi kita...</span>
+                            </div>
+                        </div>
+                
+                        <div id="hint-result" class="mt-2"></div>
+                    </div>
+                </details>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- FORM SUBMIT EXAM HIDDEN -->
+    <form id="form-submit-exam" action="/submit-exam" method="POST" class="hidden">
+        <input type="hidden" name="session_id" value="{{ session_id }}">
+        <input type="hidden" id="anti-cheat-detected" name="anti_cheat_detected" value="0">
+        <input type="hidden" id="anti-cheat-reason" name="anti_cheat_reason" value="">
+        <input type="hidden" id="anti-cheat-count" name="anti_cheat_count" value="0">
+    </form>
+
+    <!-- MODAL NAVIGASI SOAL -->
+    <div id="nav-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4">
+            <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+                <h3 class="text-sm font-bold text-white flex items-center space-x-2">
+                    <span>📑 Navigasi Soal</span>
+                </h3>
+                <button onclick="toggleNavModal(false)" class="text-slate-400 hover:text-white text-lg font-bold px-2">✕</button>
+            </div>
+
+            <div class="grid grid-cols-3 gap-1.5 text-[10px] text-center">
+                <div class="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 p-1.5 rounded-lg font-medium">Sudah Dijawab</div>
+                <div class="bg-amber-500/20 text-amber-300 border border-amber-500/40 p-1.5 rounded-lg font-medium">Ragu-Ragu</div>
+                <div class="bg-slate-950 text-slate-400 border border-slate-800 p-1.5 rounded-lg font-medium">Belum Dijawab</div>
+            </div>
+
+            <div id="nav-grid" class="grid grid-cols-5 gap-2 max-h-[60vh] overflow-y-auto p-1"></div>
+
+            <button onclick="toggleNavModal(false)" class="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold py-2.5 rounded-xl">
+                Tutup
+            </button>
+        </div>
+    </div>
+
+    <!-- MODAL SUBMIT KONFIRMASI -->
+    <div id="submit-modal" class="hidden fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-emerald-500/30 rounded-2xl max-w-sm w-full p-6 shadow-[0_0_30px_rgba(16,185,129,0.2)] text-center space-y-4">
+            <div class="w-14 h-14 bg-emerald-500/10 border border-emerald-500/30 rounded-full flex items-center justify-center mx-auto text-2xl">
+                🚀
+            </div>
+            <div>
+                <h3 class="text-base font-bold text-white">Konfirmasi Selesai Quiz</h3>
+                <p class="text-xs text-slate-300 mt-2 leading-relaxed">
+                    Apakah Kamu yakin ingin mengakhiri sesi Kuis ini? Pastikan seluruh soal sudah Kamu periksa kembali dengan teliti ya!
+                </p>
+            </div>
+            <div class="flex space-x-2.5 pt-2">
+                <button onclick="toggleSubmitModal(false)" class="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold py-3 rounded-xl transition">
+                    Batal
+                </button>
+                <button onclick="submitExamNow()" class="flex-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold py-3 rounded-xl transition shadow-[0_0_15px_rgba(16,185,129,0.35)]">
+                    Ya, Selesaikan!
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================================== -->
+    <!-- LOGIKA JAVASCRIPT UTAMA -->
+    <!-- ============================================================================== -->
+    <script>
+        let isSubmitting = false; // Penanda agar deteksi kecurangan mati saat submit
+        const sessionId = "{{ session_id }}";
+        // --- 1. PROSES PINDAH DARI LOBBY KE EXAM ---
+        async function startExamFromLobby() {
+            // A. Trigger Fullscreen Mode
+            const elem = document.documentElement;
+            try {
+                if (elem.requestFullscreen) {
+                    await elem.requestFullscreen();
+                } else if (elem.webkitRequestFullscreen) {
+                    await elem.webkitRequestFullscreen();
+                }
+            } catch (err) {
+                console.log("Fullscreen declined:", err);
+            }
+
+            // B. Sembunyikan Lobby, Tampilkan Exam Workspace
+            const lobbyElem = document.getElementById("lobby-container");
+            const examElem = document.getElementById("exam-container");
+
+            lobbyElem.classList.add("hidden");
+            examElem.classList.remove("hidden");
+
+            // C. Aktifkan Pengunci Tombol Back & Initialize Engine
+            activateBackLock();
+            initExamEngine();
+        }
+
+        // --- 2. PENGUNCI NAVIGASI KEMBALI (LOCK BROWSER BACK BUTTON) ---
+        function activateBackLock() {
+            history.pushState(null, null, location.href);
+            window.addEventListener('popstate', function () {
+                history.pushState(null, null, location.href);
+                alert("⚠️ NAVIGASI KEMBALI DIMATIKAN!\n\nDemi ketertiban ujian, Anda tidak dapat kembali ke halaman sebelumnya. Selesaikan seluruh soal lalu klik tombol Selesai Ujian.");
+            });
+        }
+
+        // --- 3. LOGIKA DYNAMIC FULLSCREEN TOGGLE ---
+        function updateFullscreenButtonUI() {
+            const textElem = document.getElementById("fs-text");
+            const iconElem = document.getElementById("fs-icon");
+            if (!textElem) return;
+            const isFS = document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement;
+
+            if (isFS) {
+                textElem.textContent = "Outfullscreen";
+                if (iconElem) iconElem.textContent = "📺";
+            } else {
+                textElem.textContent = "Fullscreen";
+                if (iconElem) iconElem.textContent = "📺";
+            }
+        }
+
+        function toggleFullscreenMode() {
+            const elem = document.documentElement;
+            const isFS = document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement;
+
+            if (!isFS) {
+                if (elem.requestFullscreen) elem.requestFullscreen().catch(() => {});
+                else if (elem.webkitRequestFullscreen) elem.webkitRequestFullscreen();
+            } else {
+                if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+                else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+            }
+        }
+
+        document.addEventListener("fullscreenchange", updateFullscreenButtonUI);
+        document.addEventListener("webkitfullscreenchange", updateFullscreenButtonUI);
+
+        // --- 4. ANTI-COPAS & TAB-SWITCH DETECTOR ---
+        document.addEventListener('contextmenu', e => e.preventDefault());
+        document.addEventListener('copy', e => e.preventDefault());
+        document.addEventListener('cut', e => e.preventDefault());
+        document.addEventListener('paste', e => e.preventDefault());
+
+        document.addEventListener('keydown', function(e) {
+            if (e.ctrlKey && ['c', 'v', 'a', 'u', 's', 'p'].includes(e.key.toLowerCase())) e.preventDefault();
+            if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && ['i', 'j', 'c'].includes(e.key.toLowerCase()))) e.preventDefault();
+        });
+
+        let wakeLock = null;
+        async function requestWakeLock() {
+            try {
+                if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen');
+            } catch (err) {}
+        }
+        requestWakeLock();
+
+        // --- 4. ANTI-CHEAT, PERSISTEN SERVER & HEARTBEAT ---
+        const antiCheatInitial = {{ anti_cheat_json | safe }};
+        let violationCount = Number(antiCheatInitial?.violation_count || 0);
+        const maxViolations = Number(antiCheatInitial?.max_violations || 3);
+        let lastBlurTime = 0;
+
+        const antiCheatDetectedInput = document.getElementById("anti-cheat-detected");
+        const antiCheatReasonInput = document.getElementById("anti-cheat-reason");
+        const antiCheatCountInput = document.getElementById("anti-cheat-count");
+
+        function syncAntiCheatHiddenFields() {
+            if (antiCheatDetectedInput) {
+                antiCheatDetectedInput.value = violationCount >= maxViolations ? "1" : "0";
+            }
+            if (antiCheatReasonInput) {
+                antiCheatReasonInput.value = violationCount > 0 ? "Pindah tab" : "";
+            }
+            if (antiCheatCountInput) {
+                antiCheatCountInput.value = String(violationCount);
+            }
+        }
+
+        function updateCheatWarningBar() {
+            const warningBar = document.getElementById("cheat-warning-bar");
+            const countText = document.getElementById("violation-count-text");
+
+            if (violationCount > 0 && warningBar) {
+                warningBar.classList.remove("hidden");
+            }
+
+            if (countText) {
+                countText.textContent = `${Math.min(violationCount, maxViolations)} / ${maxViolations}`;
+            }
+
+            syncAntiCheatHiddenFields();
+        }
+
+        function persistAntiCheatViolation() {
+            const formData = new URLSearchParams();
+            formData.append("session_id", sessionId);
+            formData.append("violation_count", String(violationCount));
+            formData.append("reason", "Pindah tab");
+
+            // sendBeacon lebih tahan saat browser mulai menangguhkan tab.
+            try {
+                const payload = new Blob([formData.toString()], {
+                    type: "application/x-www-form-urlencoded;charset=UTF-8"
+                });
+                if (navigator.sendBeacon) {
+                    navigator.sendBeacon("/api/anti-cheat", payload);
+                    return;
+                }
+            } catch (err) {
+                console.warn("Beacon anti-cheat gagal:", err);
+            }
+
+            fetch("/api/anti-cheat", {
+                method: "POST",
+                headers: {"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"},
+                body: formData.toString(),
+                keepalive: true
+            }).catch(() => {});
+        }
+
+        function handleTabSwitch() {
+            if (isSubmitting) return;
+
+            const now = Date.now();
+            if (now - lastBlurTime < 1500) return;
+            lastBlurTime = now;
+
+            violationCount = Math.min(violationCount + 1, maxViolations);
+            updateCheatWarningBar();
+            persistAntiCheatViolation();
+
+            if (violationCount >= maxViolations) {
+                isSubmitting = true;
+                updateCheatWarningBar();
+
+                alert(
+                    "🚨 DETEKSI KECURANGAN!\n\n" +
+                    `Anda meninggalkan tab ujian ${maxViolations} kali.\n` +
+                    "Ujian otomatis dihentikan dan dikirim ke guru."
+                );
+
+                const form = document.getElementById("form-submit-exam");
+                if (form) form.submit();
+            } else {
+                alert(
+                    `⚠️ PERINGATAN KECURANGAN (${violationCount}/${maxViolations})!\n\n` +
+                    "Dilarang meninggalkan tab ujian."
+                );
+            }
+        }
+
+        document.addEventListener("visibilitychange", async () => {
+            if (isSubmitting) return;
+
+            if (document.visibilityState === "visible") {
+                if (wakeLock !== null) await requestWakeLock();
+            } else if (document.hidden) {
+                handleTabSwitch();
+            }
+        });
+
+        // Heartbeat mencegah dashboard menganggap siswa aktif sebagai "Terputus"
+        // hanya karena siswa lama pada satu soal tanpa memilih jawaban baru.
+        const heartbeatInterval = setInterval(() => {
+            if (isSubmitting || document.visibilityState !== "visible") return;
+
+            const formData = new URLSearchParams();
+            formData.append("session_id", sessionId);
+
+            fetch("/api/session-heartbeat", {
+                method: "POST",
+                headers: {"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"},
+                body: formData.toString(),
+                keepalive: true
+            }).catch(() => {});
+        }, 15000);
+
+        updateCheatWarningBar();
+
+        // --- 5. LOGIKA UTAMA ENGINE CBT & KATEX RENDERER ---
+        const quizData = {{ quiz_json | safe }};
+        
+        let answers = {{ answers_json | safe }}; 
+        let remainingSeconds = {{ remaining_seconds }};
+        let currentIndex = 0;
+        let raguState = {};
+        let timerInterval = null;
+
+        function waitForMathRenderer(timeoutMs = 2500) {
+            return new Promise(resolve => {
+                if (window.renderMathInElement) {
+                    resolve(true);
+                    return;
+                }
+
+                const started = Date.now();
+                const poll = () => {
+                    if (window.renderMathInElement) {
+                        resolve(true);
+                    } else if (Date.now() - started >= timeoutMs) {
+                        resolve(false);
+                    } else {
+                        requestAnimationFrame(poll);
+                    }
+                };
+                poll();
+            });
+        }
+
+        async function triggerKaTeX(targetElem) {
+            const container = targetElem || document.getElementById("question-box") || document.body;
+            const ready = await waitForMathRenderer();
+            if (ready && container) {
+                renderMathInElement(container, {
+                    delimiters: [
+                        {left: "$$", right: "$$", display: true},
+                        {left: "$", right: "$", display: false}
+                    ],
+                    throwOnError: false
+                });
+            }
+            return ready;
+        }
+
+        function toggleNavModal(show) {
+            const modal = document.getElementById("nav-modal");
+            if (show) {
+                renderGrid();
+                modal.classList.remove("hidden");
+            } else {
+                modal.classList.add("hidden");
+            }
+        }
+
+        function toggleSubmitModal(show) {
+            const modal = document.getElementById("submit-modal");
+            if (show) modal.classList.remove("hidden");
+            else modal.classList.add("hidden");
+        }
+
+        function submitExamNow() {
+            isSubmitting = true;
+
+            // Submit manual selalu dianggap selesai normal.
+            if (antiCheatDetectedInput) antiCheatDetectedInput.value = "0";
+            if (antiCheatReasonInput) antiCheatReasonInput.value = "";
+            if (antiCheatCountInput) antiCheatCountInput.value = String(violationCount);
+
+            document.getElementById("form-submit-exam").submit();
+        }
+
+        let questionRenderToken = 0;
+        let selectedOptionIndex = null;
+        let answerSaveQueue = Promise.resolve();
+
+        function setOptionVisualState(btn, selected) {
+            if (!btn) return;
+
+            btn.classList.toggle("bg-emerald-500/10", selected);
+            btn.classList.toggle("border-emerald-500", selected);
+            btn.classList.toggle("text-emerald-300", selected);
+            btn.classList.toggle("font-medium", selected);
+            btn.classList.toggle("shadow-[0_0_10px_rgba(16,185,129,0.15)]", selected);
+
+            btn.classList.toggle("bg-slate-950", !selected);
+            btn.classList.toggle("border-slate-800", !selected);
+            btn.classList.toggle("text-slate-300", !selected);
+            btn.classList.toggle("active:border-slate-700", !selected);
+
+            const badge = btn.querySelector("[data-option-badge]");
+            if (badge) {
+                badge.classList.toggle("border-emerald-500", selected);
+                badge.classList.toggle("bg-emerald-500", selected);
+                badge.classList.toggle("text-slate-950", selected);
+            }
+        }
+
+        function queueAnswerSave(index, opt) {
+            /*
+             * Jangan membuat klik pilihan menunggu network.
+             * Request diserialkan agar klik cepat A -> B -> C tidak tiba
+             * di server dalam urutan acak.
+             */
+            const payload = {
+                session_id: sessionId,
+                q_index: index,
+                answer: opt
+            };
+
+            answerSaveQueue = answerSaveQueue
+                .catch(() => {})
+                .then(() => {
+                    const formData = new FormData();
+                    formData.append("session_id", payload.session_id);
+                    formData.append("q_index", payload.q_index);
+                    formData.append("answer", payload.answer);
+
+                    return fetch("/api/save-answer", {
+                        method: "POST",
+                        body: formData,
+                        keepalive: true
+                    }).catch(() => {});
+                });
+        }
+
+        async function renderQuestion(index) {
+            if (index < 0 || index >= quizData.length) return;
+
+            const token = ++questionRenderToken;
+            currentIndex = index;
+            selectedOptionIndex = null;
+
+            const item = quizData[index];
+            const questionText = document.getElementById("question-text");
+            const optsDiv = document.getElementById("options-container");
+
+            /*
+             * Kunci tampilan konten soal selama perpindahan.
+             * Ini mencegah flash LaTeX mentah -> KaTeX bagus.
+             * Tombol navigasi tetap terlihat sehingga layout tidak meloncat.
+             */
+            questionText.classList.add("math-pending");
+            optsDiv.classList.add("math-pending");
+
+            document.getElementById("label-no-soal").textContent =
+                `Soal No. ${index + 1} dari ${quizData.length}`;
+
+            questionText.innerHTML = item.question;
+            optsDiv.innerHTML = "";
+
+            item.options.forEach((opt, optIdx) => {
+                const isSelected = String(answers[index]) === String(opt);
+                if (isSelected) selectedOptionIndex = optIdx;
+
+                const btn = document.createElement("button");
+                btn.type = "button";
+                btn.id = `opt-btn-${optIdx}`;
+                btn.dataset.optionIndex = String(optIdx);
+                btn.className =
+                    "w-full text-left p-3.5 rounded-xl border text-xs sm:text-sm " +
+                    "transition flex items-start space-x-3 " +
+                    "bg-slate-950 border-slate-800 text-slate-300 active:border-slate-700";
+
+                btn.innerHTML = `
+                    <span data-option-badge
+                        class="w-6 h-6 rounded-full border border-slate-700 flex-shrink-0
+                               flex items-center justify-center text-[11px] font-bold mt-0.5">
+                        ${opt.charAt(0)}
+                    </span>
+                    <span class="leading-relaxed">${opt}</span>
+                `;
+
+                btn.addEventListener("click", function (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    selectAnswer(index, opt, optIdx);
+                });
+
+                setOptionVisualState(btn, isSelected);
+                optsDiv.appendChild(btn);
+            });
+
+            updateNavButtons();
+            updateRaguButtonUI();
+
+            document.getElementById("hint-curr-idx").value = index;
+            document.getElementById("hint-question").value = item.question;
+            document.getElementById("hint-attempt-input").value = "";
+            document.getElementById("hint-result").innerHTML = "";
+
+            /*
+             * Render KaTeX sekali setelah DOM final.
+             * Token mencegah render soal lama membuka kembali konten
+             * setelah user sudah pindah ke soal berikutnya.
+             */
+            await triggerKaTeX(document.getElementById("question-box"));
+
+            if (token === questionRenderToken) {
+                requestAnimationFrame(() => {
+                    if (token !== questionRenderToken) return;
+                    questionText.classList.remove("math-pending");
+                    optsDiv.classList.remove("math-pending");
+                });
+            }
+        }
+
+        function selectAnswer(index, opt, optIdx) {
+            if (index !== currentIndex || !quizData[index]) return;
+
+            const previousIndex = selectedOptionIndex;
+            answers[index] = opt;
+            selectedOptionIndex = optIdx;
+
+            /*
+             * Hanya ubah state visual tombol.
+             * Tidak ada innerHTML ulang, tidak ada renderQuestion(),
+             * dan tidak ada render KaTeX ulang.
+             */
+            if (previousIndex !== null && previousIndex !== optIdx) {
+                setOptionVisualState(
+                    document.getElementById(`opt-btn-${previousIndex}`),
+                    false
+                );
+            }
+
+            setOptionVisualState(
+                document.getElementById(`opt-btn-${optIdx}`),
+                true
+            );
+
+            queueAnswerSave(index, opt);
+        }
+
+        function toggleRagu() {
+            raguState[currentIndex] = !raguState[currentIndex];
+            updateRaguButtonUI();
+        }
+
+        function updateRaguButtonUI() {
+            const btnRagu = document.getElementById("btn-ragu");
+            if (raguState[currentIndex]) {
+                btnRagu.className = "flex-1 sm:flex-none bg-amber-500 text-slate-950 border border-amber-400 font-bold text-[10px] py-2.5 px-2 rounded-xl transition text-center shadow-[0_0_12px_rgba(245,158,11,0.4)] whitespace-nowrap";
+            } else {
+                btnRagu.className = "flex-1 sm:flex-none bg-amber-500/10 active:bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[10px] font-bold py-2.5 px-2 rounded-xl transition text-center whitespace-nowrap";
+            }
+        }
+
+        function updateNavButtons() {
+            const btnPrev = document.getElementById("btn-prev");
+            const btnNextSubmit = document.getElementById("btn-next-submit");
+
+            btnPrev.disabled = currentIndex === 0 || navigationBusy;
+
+            if (currentIndex === quizData.length - 1) {
+                btnNextSubmit.textContent = "🚀 Selesai Kuis";
+                btnNextSubmit.className = "flex-1 sm:flex-none bg-rose-500 hover:bg-rose-400 active:bg-rose-600 text-white font-bold text-xs py-2.5 px-4 rounded-xl transition shadow-[0_0_15px_rgba(244,63,94,0.4)] text-center";
+            } else {
+                btnNextSubmit.textContent = "Next →";
+                btnNextSubmit.className = "flex-1 sm:flex-none bg-emerald-500 active:bg-emerald-400 text-slate-950 font-bold text-xs py-2.5 px-4 rounded-xl transition shadow-[0_0_15px_rgba(16,185,129,0.3)] text-center";
+            }
+
+            btnNextSubmit.disabled = navigationBusy;
+        }
+
+        let navigationBusy = false;
+
+        function setNavigationBusy(busy) {
+            navigationBusy = busy;
+
+            const prev = document.getElementById("btn-prev");
+            const next = document.getElementById("btn-next-submit");
+
+            if (prev) {
+                prev.disabled = busy || currentIndex === 0;
+                prev.setAttribute("aria-busy", busy ? "true" : "false");
+            }
+
+            if (next) {
+                next.disabled = busy;
+                next.setAttribute("aria-busy", busy ? "true" : "false");
+                next.classList.toggle("opacity-80", busy);
+                next.classList.toggle("cursor-wait", busy);
+            }
+        }
+
+        async function prevQuestion() {
+            if (navigationBusy || currentIndex <= 0) return;
+
+            setNavigationBusy(true);
+            try {
+                await renderQuestion(currentIndex - 1);
+            } finally {
+                setNavigationBusy(false);
+                updateNavButtons();
+            }
+        }
+
+        async function handleNextOrSubmit() {
+            if (navigationBusy) return;
+
+            if (currentIndex < quizData.length - 1) {
+                setNavigationBusy(true);
+                try {
+                    await renderQuestion(currentIndex + 1);
+                } finally {
+                    setNavigationBusy(false);
+                    updateNavButtons();
+                }
+            } else {
+                toggleSubmitModal(true);
+            }
+        }
+
+        function renderGrid() {
+            const grid = document.getElementById("nav-grid");
+            grid.innerHTML = "";
+
+            quizData.forEach((_, idx) => {
+                const btn = document.createElement("button");
+                const isAnswered = answers[idx] !== undefined && answers[idx] !== null;
+                const isRagu = raguState[idx] === true;
+                const isCurrent = idx === currentIndex;
+
+                let colorClasses = "bg-slate-950 border-slate-800 text-slate-400";
+                if (isRagu) {
+                    colorClasses = "bg-amber-500/20 border-amber-500/60 text-amber-300 font-bold";
+                } else if (isAnswered) {
+                    colorClasses = "bg-emerald-500/20 border-emerald-500/60 text-emerald-300 font-bold";
+                }
+
+                btn.className = `h-10 text-xs rounded-xl border transition ${colorClasses} ${
+                    isCurrent ? 'ring-2 ring-emerald-400 border-emerald-400' : ''
+                }`;
+                btn.textContent = idx + 1;
+                btn.onclick = async () => {
+                    if (navigationBusy) return;
+                    toggleNavModal(false);
+                    setNavigationBusy(true);
+                    try {
+                        await renderQuestion(idx);
+                    } finally {
+                        setNavigationBusy(false);
+                        updateNavButtons();
+                    }
+                };
+                grid.appendChild(btn);
+            });
+        }
+
+        // Timer Sinkron Server
+        function startTimer() {
+            if (timerInterval) clearInterval(timerInterval);
+            const endTime = new Date().getTime() + (remainingSeconds * 1000);
+            
+            timerInterval = setInterval(() => {
+                const now = new Date().getTime();
+                const diff = endTime - now;
+
+                if (diff <= 0) {
+                    clearInterval(timerInterval);
+                    isSubmitting = true;
+
+                    if (antiCheatDetectedInput) antiCheatDetectedInput.value = "0";
+                    if (antiCheatReasonInput) antiCheatReasonInput.value = "";
+                    if (antiCheatCountInput) antiCheatCountInput.value = String(violationCount);
+
+                    alert("Waktu Ujian telah Habis!");
+                    document.getElementById('form-submit-exam').submit();
+                    return;
+                }
+
+                const totalSec = Math.floor(diff / 1000);
+                const h = Math.floor(totalSec / 3600);
+                const m = Math.floor((totalSec % 3600) / 60);
+                const s = totalSec % 60;
+                const hh = h < 10 ? '0' + h : String(h);
+                const mm = m < 10 ? '0' + m : String(m);
+                const ss = s < 10 ? '0' + s : String(s);
+                document.getElementById("timer-display").textContent = h > 0 ? `${hh}:${mm}:${ss}` : `${mm}:${ss}`;
+            }, 1000);
+        }
+
+        // Auto-Scroll Input ke Tengah Layar Saat Keyboard HP Aktif
+        const inputHint = document.getElementById("hint-attempt-input");
+        if (inputHint) {
+            inputHint.addEventListener("focus", function() {
+                setTimeout(() => {
+                    this.scrollIntoView({ behavior: "smooth", block: "center" });
+                }, 300);
+            });
+        }
+
+        // Render KaTeX Otomatis Setelah HTMX Menempelkan Hint AI
+        document.body.addEventListener('htmx:afterSettle', function(evt) {
+            triggerKaTeX(evt.detail.target);
+        });
+
+        // Inisialisasi Utama saat tombol Mulai diklik
+        function initExamEngine() {
+            renderQuestion(0);
+            startTimer();
+            updateFullscreenButtonUI();
+        }
+    </script>
+</body>
+</html>

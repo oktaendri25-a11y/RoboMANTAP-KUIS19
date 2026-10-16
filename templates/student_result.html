@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hasil Kuis - RoboMANTAP</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex items-center justify-center p-4">
+    <div class="max-w-lg w-full bg-slate-900 border border-emerald-500/30 rounded-2xl p-8 shadow-[0_0_40px_rgba(16,185,129,0.15)] text-center space-y-6">
+        
+        <div class="inline-block bg-emerald-500/10 border border-emerald-500/30 px-4 py-1.5 rounded-full text-xs font-bold text-emerald-400">
+            Sesi Quiz Selesai
+        </div>
+
+        <div>
+            <h1 class="text-4xl font-black text-emerald-400 tracking-tight">{{ skor }} / 100</h1>
+            <p class="text-xs text-slate-400 mt-1">Skor Akhir Pengerjaan</p>
+        </div>
+
+        <div class="grid grid-cols-3 gap-3">
+            <div class="bg-slate-950 border border-slate-800 p-3 rounded-xl">
+                <p class="text-xs text-slate-400">Benar</p>
+                <p class="text-lg font-bold text-emerald-400 mt-1">{{ benar }}</p>
+            </div>
+            <div class="bg-slate-950 border border-slate-800 p-3 rounded-xl">
+                <p class="text-xs text-slate-400">Salah</p>
+                <p class="text-lg font-bold text-rose-400 mt-1">{{ salah }}</p>
+            </div>
+            <div class="bg-slate-950 border border-slate-800 p-3 rounded-xl">
+                <p class="text-xs text-slate-400">Kosong</p>
+                <p class="text-lg font-bold text-amber-400 mt-1">{{ kosong }}</p>
+            </div>
+        </div>
+
+        <!-- Sambutan Ramah RoboMANTAP -->
+        <div class="bg-slate-950 border border-emerald-500/20 rounded-xl p-4 text-left text-xs leading-relaxed">
+            <p class="font-bold text-emerald-400 text-sm mb-1">🧕🏼 RoboMANTAP:</p>
+            <p class="text-slate-300">
+                🎉 Wah, pengerjaan kuis yang hebat, <b class="text-white">{{ nama }}</b>! 
+                Kamu berhasil menjawab <b class="text-emerald-400">{{ benar }}</b> benar dari <b class="text-white">{{ total }}</b> soal dengan skor akhir <b class="text-emerald-400">{{ skor }}</b>! 
+                Yuk, lihat pembahasan akurat dan analisis mendalamnya bersama aku!
+            </p>
+        </div>
+
+        <a href="{{ streamlit_url }}" class="block w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold py-3.5 rounded-xl transition shadow-[0_0_20px_rgba(16,185,129,0.3)]">
+            Lihat Pembahasannya dong!
+        </a>
+    </div>
+</body>
+</html>
