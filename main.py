@@ -19,11 +19,23 @@ from ai_engine import (
 )
 ai_hint_cache = {}
 app = FastAPI(title="RoboMANTAP CBT Engine")
+SERVICE_NAME = "kuis"
 
 # Path absolut agar folder templates selalu terdeteksi di Linux Render
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
+
+@app.get("/healthz")
+def healthz():
+    """Safe deployment smoke-test endpoint; never returns secret values."""
+    return {
+        "status": "ok",
+        "service": "kuis" if SERVICE_NAME == "kuis" else "tka",
+        "database_configured": bool(os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL")),
+        "gemini_configured": bool(os.getenv("GEMINI_API_KEYS") or os.getenv("GEMINI_API_KEY")),
+    }
+
 
 # Inisialisasi Tabel DB
 try:
@@ -34,7 +46,7 @@ except Exception as e:
 # In-Memory Session Storage
 STUDENT_SESSIONS: Dict[str, Dict[str, Any]] = {}
 
-STREAMLIT_URL = "https://robomantap-intelligence.streamlit.app/" # Sesuaikan dengan URL Streamlit app.py kamu
+STREAMLIT_URL = os.getenv("STREAMLIT_URL", "https://robomantap-intelligence.vercel.app/")
 
 @app.get("/", response_class=HTMLResponse)
 async def login_page(request: Request):
